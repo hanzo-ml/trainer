@@ -1,0 +1,12 @@
+This work is a fork of an upstream open-source project licensed under
+the Apache License, Version 2.0 (the "License"). The full upstream
+license text and copyright notices are preserved in LICENSE and
+throughout the source tree.
+
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Modifications by the hanzo-ml community are documented in
+HANZO_CHANGES.md. The fork is brand-neutral; branding is consumed at
+runtime from a `@<org>/brand` package per the contract in BRAND.md.
