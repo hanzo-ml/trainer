@@ -26,7 +26,6 @@ Available brand packages:
 | `@osage/brand` | Osage |
 | `@parsdao/brand` | Pars DAO |
 | `@cyrusdao/brand` | Cyrus DAO |
-| `@onyx-plus/brand` | Onyx Plus |
 | `@migaprotocol/brand` | Miga Protocol |
 | `@vccross/brand` | VC Cross |
 | `@mlc/brand` | MLC |
