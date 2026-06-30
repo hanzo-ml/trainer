@@ -1,0 +1,59 @@
+# Example TrainJob produced by the Hanzo Cloud fine-tuning broker
+# (hanzoai/ai `/v1/finetune/jobs`). It QLoRA-fine-tunes a HuggingFace base model on
+# a HuggingFace dataset using the `hanzo-ft-qlora` ClusterTrainingRuntime. The
+# broker fills the same fields from the console's new-job panel:
+#   - initializer.model / initializer.dataset .storageUri → the picked HF repos
+#     (a secretRef is added for private/gated repos, from the in-namespace hf-token
+#      Secret the broker provisions)
+#   - trainer.resourcesPerNode → the chosen GPU count
+#   - trainer.env → the recommended (or custom) hyperparameters + OUTPUT_DIR
+#     (the org's S3 Space, so checkpoints land in the tenant's bucket)
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: TrainJob
+metadata:
+  name: llama-3-1-8b-instruct-demo
+  namespace: ft-acme
+spec:
+  runtimeRef:
+    name: hanzo-ft-qlora
+    apiGroup: trainer.kubeflow.org
+    kind: ClusterTrainingRuntime
+  initializer:
+    model:
+      storageUri: hf://meta-llama/Llama-3.1-8B-Instruct
+      secretRef:
+        name: hf-token
+    dataset:
+      storageUri: hf://tatsu-lab/alpaca
+      secretRef:
+        name: hf-token
+  trainer:
+    numNodes: 1
+    resourcesPerNode:
+      limits:
+        nvidia.com/gpu: "1"
+    env:
+      - name: METHOD
+        value: qlora
+      - name: TASK
+        value: instruct
+      - name: EPOCHS
+        value: "3"
+      - name: LEARNING_RATE
+        value: "0.0002"
+      - name: BATCH_SIZE
+        value: "2"
+      - name: GRAD_ACCUM
+        value: "8"
+      - name: MAX_SEQ_LEN
+        value: "2048"
+      - name: LORA_RANK
+        value: "16"
+      - name: LORA_ALPHA
+        value: "32"
+      - name: QUANT_4BIT
+        value: "true"
+      - name: GRADIENT_CHECKPOINTING
+        value: "true"
+      - name: OUTPUT_DIR
+        value: s3://hanzo-finetunes/acme/llama-3-1-8b-instruct-demo/
