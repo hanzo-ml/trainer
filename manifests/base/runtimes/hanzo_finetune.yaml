@@ -1,0 +1,294 @@
+# Hanzo fine-tuning runtimes — one env-driven transformers + PEFT + TRL runtime per
+# method (LoRA / QLoRA / full). They fine-tune ANY HuggingFace causal LM: the base
+# model and dataset are supplied by the TrainJob's model/dataset initializers
+# (`hf://…` or `s3://…`, with a secretRef for private/gated repos), and every
+# hyperparameter is read from the trainer container env that the Hanzo Cloud
+# broker sets (MODEL_DIR / DATASET_DIR / EPOCHS / LEARNING_RATE / BATCH_SIZE /
+# LORA_RANK / QUANT_4BIT / OUTPUT_DIR / …). The node entrypoint is
+# cmd/trainers/hanzo/finetune.py; its image (ghcr.io/hanzoai/finetune-runtime) is
+# built in CI and pinned by the operator.
+#
+# A TrainJob references one of these via spec.runtimeRef.name and overrides
+# spec.initializer.{model,dataset}.storageUri + spec.trainer.{env,resourcesPerNode}.
+---
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: ClusterTrainingRuntime
+metadata:
+  name: hanzo-ft-qlora
+  labels:
+    trainer.kubeflow.org/framework: torch
+    hanzo.ai/finetune-method: qlora
+spec:
+  mlPolicy:
+    numNodes: 1
+    torch: {}
+  template:
+    spec:
+      volumeClaimPolicies:
+        - templates:
+            - metadata:
+                name: initializer
+              spec:
+                accessModes: ["ReadWriteOnce"]
+                resources:
+                  requests:
+                    storage: 100Gi
+      replicatedJobs:
+        - name: dataset-initializer
+          template:
+            metadata:
+              labels:
+                trainer.kubeflow.org/trainjob-ancestor-step: dataset-initializer
+            spec:
+              template:
+                spec:
+                  containers:
+                    - name: dataset-initializer
+                      image: ghcr.io/kubeflow/trainer/dataset-initializer
+                      env:
+                        - name: STORAGE_URI
+                          value: hf://tatsu-lab/alpaca
+                      volumeMounts:
+                        - mountPath: /workspace/dataset
+                          name: initializer
+        - name: model-initializer
+          template:
+            metadata:
+              labels:
+                trainer.kubeflow.org/trainjob-ancestor-step: model-initializer
+            spec:
+              template:
+                spec:
+                  containers:
+                    - name: model-initializer
+                      image: ghcr.io/kubeflow/trainer/model-initializer
+                      env:
+                        - name: STORAGE_URI
+                          value: hf://meta-llama/Llama-3.1-8B-Instruct
+                      volumeMounts:
+                        - mountPath: /workspace/model
+                          name: initializer
+        - name: node
+          dependsOn:
+            - name: dataset-initializer
+              status: Complete
+            - name: model-initializer
+              status: Complete
+          template:
+            metadata:
+              labels:
+                trainer.kubeflow.org/trainjob-ancestor-step: trainer
+            spec:
+              template:
+                spec:
+                  containers:
+                    - name: node
+                      image: ghcr.io/hanzoai/finetune-runtime:0.1.0
+                      command:
+                        - python
+                        - /app/finetune.py
+                      env:
+                        - name: METHOD
+                          value: qlora
+                        - name: QUANT_4BIT
+                          value: "true"
+                        - name: MODEL_DIR
+                          value: /workspace/model
+                        - name: DATASET_DIR
+                          value: /workspace/dataset
+                        - name: OUTPUT_DIR
+                          value: /workspace/output
+                      resources:
+                        limits:
+                          nvidia.com/gpu: 1
+                      volumeMounts:
+                        - mountPath: /workspace
+                          name: initializer
+---
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: ClusterTrainingRuntime
+metadata:
+  name: hanzo-ft-lora
+  labels:
+    trainer.kubeflow.org/framework: torch
+    hanzo.ai/finetune-method: lora
+spec:
+  mlPolicy:
+    numNodes: 1
+    torch: {}
+  template:
+    spec:
+      volumeClaimPolicies:
+        - templates:
+            - metadata:
+                name: initializer
+              spec:
+                accessModes: ["ReadWriteOnce"]
+                resources:
+                  requests:
+                    storage: 100Gi
+      replicatedJobs:
+        - name: dataset-initializer
+          template:
+            metadata:
+              labels:
+                trainer.kubeflow.org/trainjob-ancestor-step: dataset-initializer
+            spec:
+              template:
+                spec:
+                  containers:
+                    - name: dataset-initializer
+                      image: ghcr.io/kubeflow/trainer/dataset-initializer
+                      env:
+                        - name: STORAGE_URI
+                          value: hf://tatsu-lab/alpaca
+                      volumeMounts:
+                        - mountPath: /workspace/dataset
+                          name: initializer
+        - name: model-initializer
+          template:
+            metadata:
+              labels:
+                trainer.kubeflow.org/trainjob-ancestor-step: model-initializer
+            spec:
+              template:
+                spec:
+                  containers:
+                    - name: model-initializer
+                      image: ghcr.io/kubeflow/trainer/model-initializer
+                      env:
+                        - name: STORAGE_URI
+                          value: hf://meta-llama/Llama-3.1-8B-Instruct
+                      volumeMounts:
+                        - mountPath: /workspace/model
+                          name: initializer
+        - name: node
+          dependsOn:
+            - name: dataset-initializer
+              status: Complete
+            - name: model-initializer
+              status: Complete
+          template:
+            metadata:
+              labels:
+                trainer.kubeflow.org/trainjob-ancestor-step: trainer
+            spec:
+              template:
+                spec:
+                  containers:
+                    - name: node
+                      image: ghcr.io/hanzoai/finetune-runtime:0.1.0
+                      command:
+                        - python
+                        - /app/finetune.py
+                      env:
+                        - name: METHOD
+                          value: lora
+                        - name: QUANT_4BIT
+                          value: "false"
+                        - name: MODEL_DIR
+                          value: /workspace/model
+                        - name: DATASET_DIR
+                          value: /workspace/dataset
+                        - name: OUTPUT_DIR
+                          value: /workspace/output
+                      resources:
+                        limits:
+                          nvidia.com/gpu: 1
+                      volumeMounts:
+                        - mountPath: /workspace
+                          name: initializer
+---
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: ClusterTrainingRuntime
+metadata:
+  name: hanzo-ft-full
+  labels:
+    trainer.kubeflow.org/framework: torch
+    hanzo.ai/finetune-method: full
+spec:
+  mlPolicy:
+    numNodes: 1
+    torch: {}
+  template:
+    spec:
+      volumeClaimPolicies:
+        - templates:
+            - metadata:
+                name: initializer
+              spec:
+                accessModes: ["ReadWriteOnce"]
+                resources:
+                  requests:
+                    storage: 200Gi
+      replicatedJobs:
+        - name: dataset-initializer
+          template:
+            metadata:
+              labels:
+                trainer.kubeflow.org/trainjob-ancestor-step: dataset-initializer
+            spec:
+              template:
+                spec:
+                  containers:
+                    - name: dataset-initializer
+                      image: ghcr.io/kubeflow/trainer/dataset-initializer
+                      env:
+                        - name: STORAGE_URI
+                          value: hf://tatsu-lab/alpaca
+                      volumeMounts:
+                        - mountPath: /workspace/dataset
+                          name: initializer
+        - name: model-initializer
+          template:
+            metadata:
+              labels:
+                trainer.kubeflow.org/trainjob-ancestor-step: model-initializer
+            spec:
+              template:
+                spec:
+                  containers:
+                    - name: model-initializer
+                      image: ghcr.io/kubeflow/trainer/model-initializer
+                      env:
+                        - name: STORAGE_URI
+                          value: hf://meta-llama/Llama-3.1-8B-Instruct
+                      volumeMounts:
+                        - mountPath: /workspace/model
+                          name: initializer
+        - name: node
+          dependsOn:
+            - name: dataset-initializer
+              status: Complete
+            - name: model-initializer
+              status: Complete
+          template:
+            metadata:
+              labels:
+                trainer.kubeflow.org/trainjob-ancestor-step: trainer
+            spec:
+              template:
+                spec:
+                  containers:
+                    - name: node
+                      image: ghcr.io/hanzoai/finetune-runtime:0.1.0
+                      command:
+                        - python
+                        - /app/finetune.py
+                      env:
+                        - name: METHOD
+                          value: full
+                        - name: QUANT_4BIT
+                          value: "false"
+                        - name: MODEL_DIR
+                          value: /workspace/model
+                        - name: DATASET_DIR
+                          value: /workspace/dataset
+                        - name: OUTPUT_DIR
+                          value: /workspace/output
+                      resources:
+                        limits:
+                          nvidia.com/gpu: 1
+                      volumeMounts:
+                        - mountPath: /workspace
+                          name: initializer
