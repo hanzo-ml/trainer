@@ -1,18 +1,16 @@
-#
-# Copyright 2026 The Kubeflow authors.
+# Copyright 2026 The Kubeflow Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
-#     https://www.apache.org/licenses/LICENSE-2.0
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
 
 # Default values for trainer.
 # This is a YAML-formatted file.
@@ -104,7 +102,7 @@ manager:
     runAsNonRoot: true
     capabilities:
       drop:
-      - ALL
+        - ALL
     seccompProfile:
       type: RuntimeDefault
 
@@ -138,6 +136,11 @@ manager:
       # webhookServiceName and webhookSecretName are auto-generated if not specified
       webhookServiceName: ""
       webhookSecretName: ""
+    clientConnection:
+      # -- QPS rate limit for the manager's Kubernetes API client. Accepts fractional values (e.g. 0.5).
+      qps: 50
+      # -- Burst rate limit for the manager's Kubernetes API client
+      burst: 100
     statusServer:
       # -- Port that the TrainJob status server serves on.
       port: 10443
@@ -182,6 +185,11 @@ runtimes:
   # -- Enable all default runtimes (torch, deepspeed, mlx, jax, torchtune) when set to true.
   # Individual runtime settings will be ignored if this is enabled.
   defaultEnabled: false
+
+  # -- Common labels applied to every built-in runtime.
+  # The built-in ClusterTrainingRuntime are validated ahead of time.
+  commonLabels:
+    trainer.kubeflow.org/webhook-validation: disabled
 
   # -- PyTorch distributed training runtime (no custom images required)
   torchDistributed:
