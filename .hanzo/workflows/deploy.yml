@@ -1,0 +1,88 @@
+name: build
+# Trainer is a FORK (hanzo-ml/trainer), not a vendored upstream, so the image the
+# cluster runs must come from here — not ghcr.io/kubeflow/trainer/*:v2.2.0,
+# which is what ns kubeflow ran until this lane existed.
+#
+# ONE image, because that is exactly what the cluster consumes:
+# trainer-controller-manager. The runtimes/* and initializers/* Dockerfiles are
+# NOT built here; nothing deploys them yet, and building an artifact no one runs
+# is how a pipeline rots unnoticed.
+#
+# ⚠️ The hanzo-ml ORG HAS NO ACTIONS SECRETS (hanzoai has GHCR_USER/GHCR_TOKEN/
+# GH_PAT; hanzo-ml has none). So this workflow BUILDS unconditionally — which
+# proves the fork still compiles, the thing most worth knowing — and PUSHES only
+# when a token is present. Until the org is given credentials the run is green
+# and the log says plainly that nothing was published, instead of the cluster
+# quietly serving upstream forever.
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'cmd/**'
+      - 'pkg/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.hanzo/workflows/deploy.yml'
+  workflow_dispatch: {}
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: [hanzo-build-linux-amd64]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: trainer-controller-manager
+            dockerfile: cmd/trainer-controller-manager/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: meta
+        run: echo "tag=sha-$(echo "$GITHUB_SHA" | cut -c1-7)" >> "$GITHUB_OUTPUT"
+
+      - id: creds
+        run: |
+          set -euo pipefail
+          if [ -n "${{ secrets.GHCR_TOKEN }}" ]; then
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "push=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::hanzo-ml has no GHCR_TOKEN — building only, nothing will be published."
+          fi
+
+      - uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+          driver-opts: network=host
+
+      - uses: docker/login-action@v3
+        if: ${{ steps.creds.outputs.push == 'true' }}
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.GHCR_USER }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: ${{ steps.creds.outputs.push == 'true' }}
+          tags: ghcr.io/hanzoai/${{ matrix.image }}:${{ steps.meta.outputs.tag }}
+
+      # build-push-action can exit 0 before the manifest resolves, so a green run
+      # is weaker evidence than a tag that actually pulls.
+      - name: the pushed image resolves
+        if: ${{ steps.creds.outputs.push == 'true' }}
+        run: |
+          set -euo pipefail
+          img="ghcr.io/hanzoai/${{ matrix.image }}:${{ steps.meta.outputs.tag }}"
+          for i in 1 2 3 4 5 6; do
+            if docker buildx imagetools inspect "${img}" >/dev/null 2>&1; then
+              echo "resolved ${img}"; exit 0
+            fi
+            [ "${i}" = 6 ] && { echo "::error::pushed image never resolved: ${img}"; exit 1; }
+            sleep 5
+          done
